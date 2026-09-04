@@ -218,9 +218,3 @@ The project includes additional documentation to make development and maintenanc
 
 
 
-SmartFare Extended — More Vehicles, Baggage Check-In & Ride Ratings
-Added 4 new vehicles: SUV, MiniVan, Truck, and Bicycle (fleet now 9 vehicles total).
-Introduced a baggage check-in system with small/medium/large bag fees, free-bag allowances for premium vehicles, and a block on baggage for Bike/Bicycle.
-Added a post-ride rating system (1–5 stars) stored per trip.
-Added an Admin Panel option to view average ratings per vehicle type.
-Updated receipts, trip history, and saved trip files to display baggage fees and ratings.
