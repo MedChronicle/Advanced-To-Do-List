@@ -1,113 +1,232 @@
-import React, { useState, useEffect } from 'react';
+// src/app/App.tsx
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Moon, Sun, Plus, LayoutDashboard, CheckSquare, Sparkles } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
+import { Moon, Sun, Plus, Sparkles } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Sidebar } from './components/Sidebar';
-import { Dashboard } from './components/Dashboard';
 import { TaskList } from './components/TaskList';
 import { TaskDialog } from './components/TaskDialog';
 import { SearchBar } from './components/SearchBar';
-import { ProgressPage } from './components/ProgressPage';
-import { Task, Category, FilterState } from './types';
+import type { Task, Category, FilterState } from './types';
 import { getFromStorage, saveToStorage } from './utils/storage';
 
-export default function App() {
+// Heavy views (Recharts) load on demand
+const Dashboard = lazy(() => import('./components/Dashboard').then(m => ({ default: m.Dashboard })));
+const ProgressPage = lazy(() => import('./components/ProgressPage').then(m => ({ default: m.ProgressPage })));
 
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+type Theme = 'light' | 'dark';
+type View = 'dashboard' | 'tasks' | 'progress';
+type TaskInput = Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
+
+const DEFAULT_CATEGORIES: Category[] = [
+  { id: '1', name: 'Work', color: '#3b82f6' },
+  { id: '2', name: 'Personal', color: '#10b981' },
+  { id: '3', name: 'Communication Skills', color: '#f59e0b' },
+  { id: '4', name: 'Health', color: '#ef4444' },
+];
+
+const EMPTY_FILTERS: FilterState = { search: '', category: null, priority: null, status: null };
+
+const VIEW_META: Record<View, { title: string; subtitle: string }> = {
+  dashboard: { title: 'Dashboard', subtitle: 'Your productivity overview' },
+  progress: { title: 'Progress', subtitle: 'Track your daily progress' },
+  tasks: { title: 'My Tasks', subtitle: 'Manage your tasks efficiently' },
+};
+
+const VIEW_SHORTCUTS: Record<string, View> = { '1': 'dashboard', '2': 'tasks', '3': 'progress' };
+
+const newId = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Saved choice first, then the OS preference (same logic as the inline script in index.html). */
+function getInitialTheme(): Theme {
+  try {
     const saved = localStorage.getItem('theme');
-    return (saved as 'light' | 'dark') || 'light';
-  });
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* storage unavailable */ }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
-  const [tasks, setTasks] = useState<Task[]>(() => getFromStorage('tasks', []));
+function isTypingTarget(el: EventTarget | null) {
+  if (!(el instanceof HTMLElement)) return false;
+  return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+}
 
-  const [categories, setCategories] = useState<Category[]>(() =>
-    getFromStorage('categories', [
-      { id: '1', name: 'Work', color: '#3b82f6' },
-      { id: '2', name: 'Personal', color: '#10b981' },
-      { id: '3', name: 'Communication Skills', color: '#f59e0b' },
-      { id: '4', name: 'Health', color: '#ef4444' },
-    ])
+function ViewFallback({ theme }: { theme: Theme }) {
+  return (
+    <div className="grid place-items-center py-24" role="status" aria-label="Loading view">
+      <div
+        className={`h-8 w-8 animate-spin rounded-full border-2 border-t-transparent ${
+          theme === 'dark' ? 'border-blue-400' : 'border-blue-600'
+        }`}
+      />
+    </div>
   );
+}
 
-  const [view, setView] = useState<'dashboard' | 'tasks' | 'progress'>('dashboard');
+export default function App() {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [tasks, setTasks] = useState<Task[]>(() => getFromStorage<Task[]>('tasks', []));
+  const [categories, setCategories] = useState<Category[]>(() =>
+    getFromStorage<Category[]>('categories', DEFAULT_CATEGORIES)
+  );
+  const [view, setView] = useState<View>('dashboard');
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    category: null,
-    priority: null,
-    status: null,
-  });
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
 
-  // Save to localStorage whenever data changes
-  useEffect(() => {
-    saveToStorage('tasks', tasks);
-  }, [tasks]);
+  // Latest tasks for handlers that need to read state without re-creating themselves
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
+  // ───────── Persistence ─────────
+  useEffect(() => { saveToStorage('tasks', tasks); }, [tasks]);
+  useEffect(() => { saveToStorage('categories', categories); }, [categories]);
   useEffect(() => {
-    saveToStorage('categories', categories);
-  }, [categories]);
-
-  useEffect(() => {
-    localStorage.setItem('theme', theme);
+    try { localStorage.setItem('theme', theme); } catch { /* ignore */ }
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
-  const handleAddTask = (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newTask: Task = {
-      ...task,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setTasks([newTask, ...tasks]);
-  };
+  const toggleTheme = useCallback(() => {
+    const root = document.documentElement;
+    root.classList.add('theme-transition'); // smooth colour fade, defined in the theme CSS
+    setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+    window.setTimeout(() => root.classList.remove('theme-transition'), 350);
+  }, []);
 
-  const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(tasks.map(task =>
-      task.id === taskId
-        ? { ...task, ...updates, updatedAt: new Date().toISOString() }
-        : task
-    ));
-  };
+  // ───────── Task handlers (functional updates: never act on stale state) ─────────
+  const handleAddTask = useCallback((task: TaskInput) => {
+    const now = new Date().toISOString();
+    setTasks(prev => [{ ...task, id: newId(), createdAt: now, updatedAt: now }, ...prev]);
+  }, []);
 
-  const handleDeleteTask = (taskId: string) => {
-    setTasks(tasks.filter(task => task.id !== taskId));
-  };
+  const handleUpdateTask = useCallback((taskId: string, updates: Partial<Task>) => {
+    const now = new Date().toISOString();
+    setTasks(prev => prev.map(t => (t.id === taskId ? { ...t, ...updates, updatedAt: now } : t)));
+  }, []);
 
-  const handleReorderTasks = (reorderedTasks: Task[]) => {
-    setTasks(reorderedTasks);
-  };
+  const handleDeleteTask = useCallback((taskId: string) => {
+    const index = tasksRef.current.findIndex(t => t.id === taskId);
+    if (index === -1) return;
+    const removed = tasksRef.current[index];
 
-  const handleToggleComplete = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+
+    toast(`Deleted “${removed.title}”`, {
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          setTasks(prev => {
+            const next = [...prev];
+            next.splice(Math.min(index, next.length), 0, removed);
+            return next;
+          }),
+      },
+    });
+  }, []);
+
+  const handleReorderTasks = useCallback((reordered: Task[]) => setTasks(reordered), []);
+
+  const handleToggleComplete = useCallback((taskId: string) => {
+    const task = tasksRef.current.find(t => t.id === taskId);
     if (!task) return;
+    const completing = !task.completed;
 
     handleUpdateTask(taskId, {
-      completed: !task.completed,
-      completedAt: !task.completed ? new Date().toISOString() : undefined,
+      completed: completing,
+      completedAt: completing ? new Date().toISOString() : undefined,
     });
-  };
 
-  const handleEditTask = (task: Task) => {
+    // Small celebration, loaded on demand and skipped for reduced-motion users
+    if (completing && !prefersReducedMotion()) {
+      import('canvas-confetti')
+        .then(m => m.default({ particleCount: 60, spread: 70, origin: { y: 0.7 }, disableForReducedMotion: true }))
+        .catch(() => { /* non-critical */ });
+    }
+  }, [handleUpdateTask]);
+
+  // ───────── Dialog ─────────
+  const openNewTask = useCallback(() => {
+    setEditingTask(null);
+    setIsTaskDialogOpen(true);
+  }, []);
+
+  const handleEditTask = useCallback((task: Task) => {
     setEditingTask(task);
     setIsTaskDialogOpen(true);
-  };
+  }, []);
 
-  const handleCloseDialog = () => {
+  const handleCloseDialog = useCallback(() => {
     setIsTaskDialogOpen(false);
     setEditingTask(null);
-  };
+  }, []);
+
+  const handleDialogOpenChange = useCallback(
+    (open: boolean) => { if (!open) handleCloseDialog(); },
+    [handleCloseDialog]
+  );
+
+  const handleSave = useCallback((taskData: TaskInput) => {
+    if (editingTask) handleUpdateTask(editingTask.id, taskData);
+    else handleAddTask(taskData);
+    handleCloseDialog();
+  }, [editingTask, handleUpdateTask, handleAddTask, handleCloseDialog]);
+
+  // ───────── Keyboard shortcuts: N = new task, 1/2/3 = switch view ─────────
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target) || isTaskDialogOpen) return;
+      if (e.key.toLowerCase() === 'n') { e.preventDefault(); openNewTask(); }
+      else if (VIEW_SHORTCUTS[e.key]) setView(VIEW_SHORTCUTS[e.key]);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isTaskDialogOpen, openNewTask]);
+
+  // ───────── Derived UI ─────────
+  const dark = theme === 'dark';
+  const meta = VIEW_META[view];
+  const handleSearch = useCallback((search: string) => setFilters(f => ({ ...f, search })), []);
+
+  const searchBar = useMemo(
+    () => <SearchBar value={filters.search} onChange={handleSearch} theme={theme} />,
+    [filters.search, handleSearch, theme]
+  );
+
+  let content: React.ReactNode;
+  if (view === 'dashboard') {
+    content = <Dashboard tasks={tasks} categories={categories} onViewTasks={() => setView('tasks')} theme={theme} />;
+  } else if (view === 'progress') {
+    content = <ProgressPage tasks={tasks} categories={categories} theme={theme} />;
+  } else {
+    content = (
+      <TaskList
+        tasks={tasks}
+        categories={categories}
+        filters={filters}
+        onToggleComplete={handleToggleComplete}
+        onEditTask={handleEditTask}
+        onDeleteTask={handleDeleteTask}
+        onReorderTasks={handleReorderTasks}
+        theme={theme}
+      />
+    );
+  }
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className={`min-h-screen transition-colors duration-500 ${
-        theme === 'dark'
-          ? 'bg-gradient-to-br from-[#1a1a1a] via-[#252525] to-[#1a1a1a]'
-          : 'bg-gradient-to-br from-gray-50 via-white to-gray-100'
-      }`}>
+      <div
+        className={`min-h-screen transition-colors duration-500 ${
+          dark
+            ? 'bg-gradient-to-br from-[#1a1a1a] via-[#252525] to-[#1a1a1a]'
+            : 'bg-gradient-to-br from-gray-50 via-white to-gray-100'
+        }`}
+      >
         <div className="flex h-screen overflow-hidden">
           <Sidebar
             view={view}
@@ -119,135 +238,70 @@ export default function App() {
             theme={theme}
           />
 
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <header className={`border-b transition-all duration-300 ${
-              theme === 'dark' ? 'bg-[#1a1a1a]/80 border-[#2a2a2a] shadow-xl shadow-black/20' : 'bg-white/80 border-gray-200 shadow-lg shadow-gray-200/50'
-            } backdrop-blur-xl`}>
-              <div className="px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <header
+              className={`border-b backdrop-blur-xl transition-all duration-300 ${
+                dark
+                  ? 'border-[#2a2a2a] bg-[#1a1a1a]/80 shadow-xl shadow-black/20'
+                  : 'border-gray-200 bg-white/80 shadow-lg shadow-gray-200/50'
+              }`}
+            >
+              <div className="px-4 py-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <motion.div
-                      whileHover={{ rotate: 180, scale: 1.1 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <Sparkles className={`w-8 h-8 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
+                    <motion.div whileHover={{ rotate: 180, scale: 1.1 }} transition={{ duration: 0.3 }}>
+                      <Sparkles className={`h-8 w-8 ${dark ? 'text-blue-400' : 'text-blue-600'}`} />
                     </motion.div>
                     <div>
-                      <h1 className={`text-2xl ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                        {view === 'dashboard' ? 'Dashboard' : view === 'progress' ? 'Progress' : 'My Tasks'}
-                      </h1>
-                      <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-                        {view === 'dashboard'
-                          ? 'Your productivity overview'
-                          : view === 'progress'
-                          ? 'Track your daily progress'
-                          : 'Manage your tasks efficiently'}
-                      </p>
+                      <h1 className={`text-2xl ${dark ? 'text-white' : 'text-gray-900'}`}>{meta.title}</h1>
+                      <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-600'}`}>{meta.subtitle}</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    {view === 'tasks' && (
-                      <div className="hidden sm:block">
-                        <SearchBar
-                          value={filters.search}
-                          onChange={(value) => setFilters({ ...filters, search: value })}
-                          theme={theme}
-                        />
-                      </div>
-                    )}
+                    {view === 'tasks' && <div className="hidden sm:block">{searchBar}</div>}
 
                     <Button
-                      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                      onClick={toggleTheme}
                       variant="outline"
                       size="icon"
+                      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
                       className={`transition-all duration-300 ${
-                        theme === 'dark'
-                          ? 'bg-[#2a2a2a] border-[#3a3a3a] hover:bg-[#353535] shadow-lg shadow-black/30'
-                          : 'bg-white border-gray-300 hover:bg-gray-50 shadow-md shadow-gray-200/50'
+                        dark
+                          ? 'border-[#3a3a3a] bg-[#2a2a2a] shadow-lg shadow-black/30 hover:bg-[#353535]'
+                          : 'border-gray-300 bg-white shadow-md shadow-gray-200/50 hover:bg-gray-50'
                       }`}
                     >
-                      {theme === 'dark' ? (
-                        <Sun className="w-5 h-5 text-yellow-400" />
-                      ) : (
-                        <Moon className="w-5 h-5 text-gray-700" />
-                      )}
+                      {dark ? <Sun className="h-5 w-5 text-yellow-400" /> : <Moon className="h-5 w-5 text-gray-700" />}
                     </Button>
 
                     <Button
-                      onClick={() => setIsTaskDialogOpen(true)}
-                      className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white shadow-xl shadow-blue-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-blue-500/50 hover:scale-105"
+                      onClick={openNewTask}
+                      title="New task (N)"
+                      className="bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-xl shadow-blue-500/40 transition-all duration-300 hover:scale-105 hover:from-blue-700 hover:to-blue-600 hover:shadow-2xl hover:shadow-blue-500/50"
                     >
-                      <Plus className="w-5 h-5 mr-2" />
+                      <Plus className="mr-2 h-5 w-5" />
                       <span className="hidden sm:inline">New Task</span>
                     </Button>
                   </div>
                 </div>
 
-                {view === 'tasks' && (
-                  <div className="mt-4 sm:hidden">
-                    <SearchBar
-                      value={filters.search}
-                      onChange={(value) => setFilters({ ...filters, search: value })}
-                      theme={theme}
-                    />
-                  </div>
-                )}
+                {view === 'tasks' && <div className="mt-4 sm:hidden">{searchBar}</div>}
               </div>
             </header>
 
             <main className="flex-1 overflow-y-auto">
-              <div className="px-4 sm:px-6 lg:px-8 py-6">
+              <div className="px-4 py-6 sm:px-6 lg:px-8">
                 <AnimatePresence mode="wait">
-                  {view === 'dashboard' ? (
-                    <motion.div
-                      key="dashboard"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <Dashboard
-                        tasks={tasks}
-                        categories={categories}
-                        onViewTasks={() => setView('tasks')}
-                        theme={theme}
-                      />
-                    </motion.div>
-                  ) : view === 'progress' ? (
-                    <motion.div
-                      key="progress"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <ProgressPage
-                        tasks={tasks}
-                        theme={theme}
-                        categories={categories}
-                      />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="tasks"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <TaskList
-                        tasks={tasks}
-                        categories={categories}
-                        filters={filters}
-                        onToggleComplete={handleToggleComplete}
-                        onEditTask={handleEditTask}
-                        onDeleteTask={handleDeleteTask}
-                        onReorderTasks={handleReorderTasks}
-                        theme={theme}
-                      />
-                    </motion.div>
-                  )}
+                  <motion.div
+                    key={view}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Suspense fallback={<ViewFallback theme={theme} />}>{content}</Suspense>
+                  </motion.div>
                 </AnimatePresence>
               </div>
             </main>
@@ -256,19 +310,14 @@ export default function App() {
 
         <TaskDialog
           open={isTaskDialogOpen}
-          onOpenChange={handleCloseDialog}
+          onOpenChange={handleDialogOpenChange}
           task={editingTask}
           categories={categories}
-          onSave={(taskData) => {
-            if (editingTask) {
-              handleUpdateTask(editingTask.id, taskData);
-            } else {
-              handleAddTask(taskData);
-            }
-            handleCloseDialog();
-          }}
+          onSave={handleSave}
           theme={theme}
         />
+
+        <Toaster theme={theme} position="bottom-right" closeButton />
       </div>
     </DndProvider>
   );
