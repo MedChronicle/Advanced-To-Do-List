@@ -1,5 +1,20 @@
+/* 1. Tailwind core, with automatic source detection turned off */
 @import 'tailwindcss' source(none);
-@source '../../**/*.{js,ts,jsx,tsx}';
+
+/* 2. Explicit scan roots. Paths are relative to THIS file (assumes src/styles/) */
+@source '../../src/**/*.{js,ts,jsx,tsx}';
+@source '../../index.html';
+
+/* 3. Classes built at runtime (e.g. `bg-${status}`) that the scanner can't see.
+      Edit to match what you actually construct dynamically. */
+@source inline('{bg,text,border}-{success,warning,info,destructive}');
+
+/* 4. Animation helpers used by shadcn (animate-in, fade-in, slide-in-from-*, zoom-in) */
 @import 'tw-animate-css';
+
+/* 5. Design tokens: :root / .dark variables, @theme, @custom-variant dark, animations.
+      Must come AFTER tailwindcss so its @theme blocks register. */
 @import './default_theme.css';
+
+/* 6. Base-layer rules and app-wide styles. Keep this last so it can override. */
 @import './globals.css';
