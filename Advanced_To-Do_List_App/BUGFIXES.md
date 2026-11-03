@@ -1,40 +1,139 @@
-# Bug Fixes
+# 🐛 Bug Fixes
 
-A record of notable issues found and resolved during development. Kept for context if similar issues resurface.
+A record of notable issues found and resolved during development, kept for context if similar problems resurface.
+
+| # | Issue | Type | Severity | File |
+|---|---|---|---|---|
+| 1 | [Radix `Select.Item` empty value](#1-radix-selectitem-empty-value-error) | Runtime error | High (crashes the form) | `TaskDialog.tsx` |
+| 2 | [Missing `DialogDescription`](#2-missing-dialogdescription) | Accessibility warning | Medium | `TaskDialog.tsx` |
+| 3 | [Ref warnings on function components](#3-ref-warnings-on-function-components) | Console warning | Low | `button.tsx`, `dialog.tsx` |
+
+---
 
 ## 1. Radix `Select.Item` empty-value error
 
-**Problem:** Radix UI's `Select.Item` doesn't accept an empty string as its `value` — the "No category" option was using `""`.
-**Error:** `A <Select.Item /> must have a value prop that is not an empty string`
+**Symptom:** the task dialog threw when opened.
+```
+A <Select.Item /> must have a value prop that is not an empty string
+```
 
-**Fix:**
-- Changed the "No category" option's value from `""` to `"none"`
-- Updated form initialization to default to `"none"`
-- Added conversion logic in `handleSubmit` to map `"none"` back to `null` before saving
+**Root cause:** Radix reserves the empty string to mean "no selection" (it shows the placeholder). The "No category" option used `""` as its value, which collides with that meaning.
 
-**File:** `src/app/components/TaskDialog.tsx`
+**Fix**
+- Changed the "No category" value from `""` to a sentinel, `"none"`
+- Defaulted the form state to `"none"`
+- Converted `"none"` back to `null` in `handleSubmit` before saving
+
+```tsx
+const NO_CATEGORY = 'none'
+
+<Select value={categoryId ?? NO_CATEGORY} onValueChange={setCategoryId}>
+  <SelectItem value={NO_CATEGORY}>No category</SelectItem>
+  {/* …categories */}
+</Select>
+
+// in handleSubmit
+categoryId: categoryId === NO_CATEGORY ? null : categoryId,
+```
+
+**Watch out for:** any place that reads `categoryId` directly (filters, stats, `TaskCard`) must treat `null` as "no category", never `"none"`. Keep the conversion at the form boundary only.
+
+**Prevention:** define the sentinel as a named constant, never an inline string, so the form and the submit handler can't drift apart.
+
+---
 
 ## 2. Missing `DialogDescription`
 
-**Problem:** Radix's `Dialog` warns when no description/`aria-describedby` is provided, which also hurts screen-reader UX.
-**Warning:** `Missing Description or aria-describedby={undefined} for {DialogContent}`
+**Symptom:** a console warning, and screen readers announced the dialog without context.
+```
+Missing Description or aria-describedby={undefined} for {DialogContent}
+```
 
-**Fix:** Imported `DialogDescription` and added descriptive text for both create and edit modes.
+**Root cause:** Radix `Dialog` expects every dialog to describe itself via `DialogDescription` or `aria-describedby`.
 
-**File:** `src/app/components/TaskDialog.tsx`
+**Fix:** imported `DialogDescription` and added text for both modes.
+
+```tsx
+<DialogHeader>
+  <DialogTitle>{task ? 'Edit task' : 'New task'}</DialogTitle>
+  <DialogDescription>
+    {task ? 'Update the details of this task.' : 'Add a task with optional subtasks, tags and dates.'}
+  </DialogDescription>
+</DialogHeader>
+```
+
+**Prevention:** every dialog, alert dialog and sheet needs a title and a description. If you don't want the text visible, wrap it in Radix's `VisuallyHidden` rather than deleting it.
+
+---
 
 ## 3. Ref warnings on function components
 
-**Problem:** Function components were receiving refs without being wrapped in `React.forwardRef`.
-**Warning:** `Function components cannot be given refs`
+**Symptom:** a console warning whenever Radix tried to attach a ref.
+```
+Function components cannot be given refs
+```
 
-**Fix:** Wrapped `Button` and `DialogOverlay` in `React.forwardRef`, added proper TypeScript ref types, and set `displayName` on both for clearer debugging.
+**Root cause:** Radix's `asChild` and `Slot` pass refs to their child. On React 18, a plain function component can't receive a ref unless it's wrapped in `React.forwardRef`.
 
-**Files:** `src/app/components/ui/button.tsx`, `src/app/components/ui/dialog.tsx`
+**Fix:** wrapped `Button` and `DialogOverlay` in `React.forwardRef`, added ref types, and set `displayName`.
+
+```tsx
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, ...props }, ref) => (
+    <button ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  )
+)
+Button.displayName = 'Button'
+```
+
+**Prevention:** any component used as the child of `asChild`, `TooltipTrigger`, `DialogTrigger` and similar needs to forward its ref. Note that React 19 makes `ref` a normal prop and `forwardRef` unnecessary, but this project is on React 18.
+
+---
+
+## Regression tests
+
+These bugs are cheap to lock down once Vitest and React Testing Library are set up (see [DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md#testing)).
+
+```tsx
+it('saves "No category" as null', async () => {
+  const onSave = vi.fn()
+  render(<TaskDialog open onSave={onSave} categories={[]} /* …props */ />)
+  await userEvent.type(screen.getByLabelText(/title/i), 'Test')
+  await userEvent.click(screen.getByRole('button', { name: /create task/i }))
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ categoryId: null }))
+})
+
+it('has an accessible description', () => {
+  render(<TaskDialog open /* …props */ />)
+  expect(screen.getByRole('dialog')).toHaveAccessibleDescription()
+})
+```
+
+---
 
 ## Suggestions for the future
 
-- Custom `forwardRef` wrappers for other frequently-reused components, to catch this class of issue earlier
-- Error boundaries around major views
-- A schema-based form library (e.g. React Hook Form + Zod) for the task form, in place of manual state
-- Unit tests around form behavior so regressions like these are caught automatically
+- [ ] **Forward refs by default** in shared `ui/` components that wrap a DOM element
+- [ ] **Error boundaries** around each major view, so one crash doesn't blank the app
+- [ ] **React Hook Form + Zod** for the task form. A schema with `categoryId: z.string().nullable()` would have made bug 1 impossible
+- [ ] **Unit and component tests** around form behaviour
+- [ ] **Treat console warnings as failures** in tests, so issues like 2 and 3 are caught in CI:
+  ```ts
+  // vitest.setup.ts
+  vi.spyOn(console, 'error').mockImplementation((msg) => { throw new Error(msg) })
+  ```
+- [ ] **Lint accessibility** with `eslint-plugin-jsx-a11y`
+
+---
+
+## Template for new entries
+
+```markdown
+## N. Short title
+
+**Symptom:** what the user or console showed (include the exact message)
+**Root cause:** why it happened
+**Fix:** what changed
+**Prevention:** how to avoid the same class of bug
+**File(s):** paths
+```
