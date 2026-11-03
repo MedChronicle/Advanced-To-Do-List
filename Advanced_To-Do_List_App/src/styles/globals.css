@@ -1,7 +1,14 @@
-@custom-variant dark (&:is(.dark *));
+x/* src/styles/default_theme.css */
 
+/* Matches <html class="dark"> itself as well as everything inside it */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ───────── Light ───────── */
 :root {
+  color-scheme: light;
   --font-size: 16px;
+  --radius: 0.625rem;
+
   --background: #ffffff;
   --foreground: oklch(0.145 0 0);
   --card: #ffffff;
@@ -22,15 +29,26 @@
   --input: transparent;
   --input-background: #f3f3f5;
   --switch-background: #cbced4;
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
   --ring: oklch(0.708 0 0);
+
+  /* Semantic status colours */
+  --success: oklch(0.62 0.17 155);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.75 0.16 75);
+  --warning-foreground: oklch(0.2 0 0);
+  --info: oklch(0.65 0.14 235);
+  --info-foreground: #ffffff;
+
+  /* Brand accents (≈ #00d4ff and #7c3aed) */
+  --brand: oklch(0.8 0.15 210);
+  --brand-2: oklch(0.55 0.24 295);
+
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: #030213;
@@ -39,9 +57,15 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
 }
 
+/* ───────── Dark ───────── */
 .dark {
+  color-scheme: dark;
+
   --background: #1a1a1a;
   --foreground: oklch(0.985 0 0);
   --card: #1a1a1a;
@@ -60,14 +84,26 @@
   --destructive-foreground: oklch(0.637 0.237 25.331);
   --border: #2a2a2a;
   --input: #2a2a2a;
+  --input-background: #222222;    /* was missing in dark */
+  --switch-background: #3a3a3a;   /* was missing in dark */
   --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
+
+  --success: oklch(0.72 0.17 155);
+  --success-foreground: oklch(0.15 0 0);
+  --warning: oklch(0.8 0.15 80);
+  --warning-foreground: oklch(0.15 0 0);
+  --info: oklch(0.72 0.13 235);
+  --info-foreground: oklch(0.15 0 0);
+
+  --brand: oklch(0.85 0.14 205);
+  --brand-2: oklch(0.65 0.22 295);
+
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
   --sidebar: #1a1a1a;
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -76,8 +112,12 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: #2a2a2a;
   --sidebar-ring: oklch(0.439 0 0);
+
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
 }
 
+/* ───────── Token → utility mapping ───────── */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -100,15 +140,27 @@
   --color-input-background: var(--input-background);
   --color-switch-background: var(--switch-background);
   --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-brand: var(--brand);
+  --color-brand-2: var(--brand-2);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -119,68 +171,98 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
+/* ───────── Motion (literal values, so plain @theme) ───────── */
+@theme {
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  body {
-    @apply bg-background text-foreground;
+  --animate-rise-in: rise-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-shimmer: shimmer 2.6s ease-in-out infinite;
+  --animate-pop: pop 0.25s ease-out;
+  --animate-float: float 2.4s ease-in-out infinite;
+
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes shimmer {
+    0%   { transform: translateX(-120%) skewX(-20deg); }
+    100% { transform: translateX(220%) skewX(-20deg); }
+  }
+  @keyframes pop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-3px); }
   }
 }
 
+/* ───────── Base ───────── */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100dvh;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--brand) 35%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  /* Tailwind v4 resets buttons to the default cursor; restore the pointer */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
+/* Default typography. The guard means: only apply when no `text-*` class is in play,
+   so your explicit Tailwind sizes (e.g. text-sm on an h2) win. Kept exactly as exported. */
 @layer base {
   :where(:not(:has([class*=' text-']), :not(:has([class^='text-'])))) {
-    h1 {
-      font-size: var(--text-2xl);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
+    h1 { font-size: var(--text-2xl); font-weight: var(--font-weight-medium); line-height: 1.5; text-wrap: balance; }
+    h2 { font-size: var(--text-xl);  font-weight: var(--font-weight-medium); line-height: 1.5; text-wrap: balance; }
+    h3 { font-size: var(--text-lg);  font-weight: var(--font-weight-medium); line-height: 1.5; text-wrap: balance; }
+    h4 { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+    p  { font-size: var(--text-base); font-weight: var(--font-weight-normal); line-height: 1.5; text-wrap: pretty; }
 
-    h2 {
-      font-size: var(--text-xl);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    h3 {
-      font-size: var(--text-lg);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    h4 {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    p {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-normal);
-      line-height: 1.5;
-    }
-
-    label {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    button {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    input {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-normal);
-      line-height: 1.5;
-    }
+    label  { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+    button { font-size: var(--text-base); font-weight: var(--font-weight-medium); line-height: 1.5; }
+    input  { font-size: var(--text-base); font-weight: var(--font-weight-normal); line-height: 1.5; }
   }
 }
 
 html {
   font-size: var(--font-size);
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Opt-in smooth theme switch: add .theme-transition to <html> for ~300ms while toggling */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 300ms, border-color 300ms, color 300ms !important;
+}
+
+/* ───────── Accessibility ───────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
