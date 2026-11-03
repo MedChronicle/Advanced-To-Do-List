@@ -1,4 +1,17 @@
+/* src/styles/tailwind.css */
+
+/* Turn off automatic source detection; sources are listed explicitly below */
 @import 'tailwindcss' source(none);
+
+/* Scan everything under src/ (the path is relative to this file) */
 @source '../**/*.{js,ts,jsx,tsx}';
 
+/* Classes used in the HTML shell (spinner, body styles, etc.) */
+@source '../../index.html';
+
+/* Safelist: classes built dynamically at runtime, which the scanner can't see.
+   Add any you construct like `bg-${color}-500`. */
+@source inline('{bg,text,border}-{success,warning,info,destructive}');
+
+/* Animation helpers: animate-in, fade-in, slide-in-from-*, zoom-in, etc. (used by shadcn) */
 @import 'tw-animate-css';
