@@ -1,0 +1,35 @@
+/* src/styles/fonts.css */
+
+/* Variable fonts: one file per family covers every weight. font-display: swap is built in. */
+@import '@fontsource-variable/inter';           /* body / UI */
+@import '@fontsource-variable/space-grotesk';   /* headings / dashboard titles */
+@import '@fontsource-variable/jetbrains-mono';  /* code, IDs, timestamps */
+
+/* Register the families as Tailwind utilities: font-sans, font-display, font-mono */
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';  /* Inter: single-storey a, cleaner digits */
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headings use the display face unless a font-* class says otherwise */
+  :where(h1, h2, h3, h4) {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Aligned numbers for stats, timers, tables */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  code, kbd, samp, pre {
+    font-family: var(--font-mono);
+    font-feature-settings: 'calt', 'zero';  /* ligatures and slashed zero */
+  }
+}
