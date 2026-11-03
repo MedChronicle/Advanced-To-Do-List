@@ -1,10 +1,25 @@
 packages:
   - '.'
+
+# Install native optional deps (esbuild, rollup, tailwind oxide, etc.)
+# for your own machine AND for Linux deploy targets.
 supportedArchitectures:
   os:
+    - current
     - linux
   cpu:
+    - current
     - x64
     - arm64
   libc:
+    - current
     - glibc
+    - musl      # Alpine-based Docker images
+
+# Only these packages may run install scripts (pnpm 10+)
+onlyBuiltDependencies:
+  - esbuild
+
+# Refuse versions published in the last 24h, a guard against
+# compromised releases (pnpm 10.16+, value in minutes)
+minimumReleaseAge: 1440
