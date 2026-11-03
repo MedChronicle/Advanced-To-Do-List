@@ -1,16 +1,34 @@
-import React, { useState } from 'react';
+// src/app/components/TaskList.tsx
+import { useCallback, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Task, Category, FilterState } from '../types';
+import { toast } from 'sonner';
+import { ChevronDown, Filter, FilterX, SortAsc } from 'lucide-react';
+import type { Task, Category, FilterState } from '../types';
 import { filterTasks, sortTasks } from '../utils/taskUtils';
+import { getFromStorage, saveToStorage } from '../utils/storage';
 import { TaskCard } from './TaskCard';
-import { Filter, SortAsc } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+
+/* ─────────────────────────── Types & constants ─────────────────────────── */
+
+type SortBy = 'manual' | 'priority' | 'dueDate' | 'created';
+type GroupBy = 'none' | 'priority' | 'category';
+
+interface Group {
+  key: string;
+  label: string;
+  color?: string;
+  tasks: Task[];
+}
 
 interface TaskListProps {
   tasks: Task[];
@@ -20,8 +38,81 @@ interface TaskListProps {
   onEditTask: (task: Task) => void;
   onDeleteTask: (taskId: string) => void;
   onReorderTasks: (tasks: Task[]) => void;
+  /** Optional: shows a "Clear filters" button in the empty state */
+  onClearFilters?: () => void;
   theme: 'light' | 'dark';
 }
+
+const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: 'manual', label: 'Manual (drag to arrange)' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'dueDate', label: 'Due date' },
+  { value: 'created', label: 'Newest first' },
+];
+
+const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'category', label: 'Category' },
+];
+
+const PRIORITY_GROUPS: { key: Task['priority']; label: string; color: string }[] = [
+  { key: 'high', label: 'High Priority', color: '#ef4444' },
+  { key: 'medium', label: 'Medium Priority', color: '#f59e0b' },
+  { key: 'low', label: 'Low Priority', color: '#10b981' },
+];
+
+const SORT_KEY = 'taskList:sortBy';
+const GROUP_KEY = 'taskList:groupBy';
+
+/* ─────────────────────────── Helpers ─────────────────────────── */
+
+function useStoredChoice<T extends string>(key: string, options: readonly { value: T }[], fallback: T) {
+  const [value, setValue] = useState<T>(() => {
+    const saved = getFromStorage<string>(key, fallback);
+    return options.some(o => o.value === saved) ? (saved as T) : fallback;
+  });
+  const update = useCallback((next: T) => {
+    setValue(next);
+    saveToStorage(key, next);
+  }, [key]);
+  return [value, update] as const;
+}
+
+const toTime = (v?: string): number | null => {
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? null : t;
+};
+
+function sortByDueDate(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    const da = toTime(a.dueDate);
+    const db = toTime(b.dueDate);
+    if (da !== null && db === null) return -1;
+    if (da === null && db !== null) return 1;
+    if (da !== null && db !== null && da !== db) return da - db;
+    return (toTime(b.createdAt) ?? 0) - (toTime(a.createdAt) ?? 0);
+  });
+}
+
+function sortByCreated(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => (toTime(b.createdAt) ?? 0) - (toTime(a.createdAt) ?? 0));
+}
+
+/**
+ * Put `ordered` back into the FULL list. Each visible task takes the next
+ * visible "slot"; hidden (filtered-out) tasks keep their exact positions,
+ * so nothing is ever lost when a filter is active.
+ */
+function mergeOrder(all: Task[], ordered: Task[]): Task[] {
+  const visible = new Set(ordered.map(t => t.id));
+  let i = 0;
+  return all.map(t => (visible.has(t.id) ? ordered[i++] : t));
+}
+
+/* ─────────────────────────── Component ─────────────────────────── */
 
 export function TaskList({
   tasks,
@@ -31,159 +122,10 @@ export function TaskList({
   onEditTask,
   onDeleteTask,
   onReorderTasks,
+  onClearFilters,
   theme,
 }: TaskListProps) {
-  const [sortBy, setSortBy] = useState<'priority' | 'dueDate' | 'created'>('priority');
-  const [groupBy, setGroupBy] = useState<'none' | 'priority' | 'category'>('none');
-
-  const filteredTasks = filterTasks(tasks, filters);
-
-  const sortedTasks = sortTasks(filteredTasks);
-
-  const groupedTasks = React.useMemo(() => {
-    if (groupBy === 'none') {
-      return { 'All Tasks': sortedTasks };
-    }
-
-    if (groupBy === 'priority') {
-      return {
-        'High Priority': sortedTasks.filter(t => t.priority === 'high'),
-        'Medium Priority': sortedTasks.filter(t => t.priority === 'medium'),
-        'Low Priority': sortedTasks.filter(t => t.priority === 'low'),
-      };
-    }
-
-    if (groupBy === 'category') {
-      const groups: Record<string, Task[]> = { 'Uncategorized': [] };
-
-      categories.forEach(cat => {
-        groups[cat.name] = sortedTasks.filter(t => t.categoryId === cat.id);
-      });
-
-      groups['Uncategorized'] = sortedTasks.filter(t => !t.categoryId);
-
-      Object.keys(groups).forEach(key => {
-        if (groups[key].length === 0) delete groups[key];
-      });
-
-      return groups;
-    }
-
-    return { 'All Tasks': sortedTasks };
-  }, [groupBy, sortedTasks, categories]);
-
-  const moveTask = (dragIndex: number, hoverIndex: number) => {
-    const dragTask = sortedTasks[dragIndex];
-    const newTasks = [...sortedTasks];
-    newTasks.splice(dragIndex, 1);
-    newTasks.splice(hoverIndex, 0, dragTask);
-    onReorderTasks(newTasks);
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className={`text-2xl ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-            {filters.category
-              ? categories.find(c => c.id === filters.category)?.name
-              : filters.priority
-              ? `${filters.priority.charAt(0).toUpperCase() + filters.priority.slice(1)} Priority Tasks`
-              : 'All Tasks'}
-          </h2>
-          <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-            {filteredTasks.length} {filteredTasks.length === 1 ? 'task' : 'tasks'}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className={theme === 'dark' ? 'bg-gray-700 border-gray-600' : ''}
-              >
-                <Filter className="w-4 h-4 mr-2" />
-                Group By
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setGroupBy('none')}>
-                None
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setGroupBy('priority')}>
-                Priority
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setGroupBy('category')}>
-                Category
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {filteredTasks.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`text-center py-12 ${
-            theme === 'dark'
-              ? 'bg-gray-800/30 border-gray-700'
-              : 'bg-gray-50 border-gray-200'
-          } rounded-xl border-2 border-dashed`}
-        >
-          <p className={`text-lg ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-            {filters.search || filters.category || filters.priority
-              ? 'No tasks match your filters'
-              : 'No tasks yet. Create your first task!'}
-          </p>
-        </motion.div>
-      ) : (
-        <div className="space-y-8">
-          {Object.entries(groupedTasks).map(([groupName, groupTasks]) => {
-            if (groupTasks.length === 0) return null;
-
-            return (
-              <div key={groupName}>
-                {groupBy !== 'none' && (
-                  <h3 className={`text-lg mb-4 ${
-                    theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-                  }`}>
-                    {groupName} ({groupTasks.length})
-                  </h3>
-                )}
-
-                <div className="space-y-3">
-                  <AnimatePresence mode="popLayout">
-                    {groupTasks.map((task, index) => (
-                      <motion.div
-                        key={task.id}
-                        layout
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, x: -100 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <TaskCard
-                          task={task}
-                          categories={categories}
-                          onToggleComplete={onToggleComplete}
-                          onEdit={onEditTask}
-                          onDelete={onDeleteTask}
-                          theme={theme}
-                          index={index}
-                          moveTask={moveTask}
-                        />
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
+  const dark = theme === 'dark';
+  const [sortBy, setSortBy] = useStoredChoice<SortBy>(SORT_KEY, SORT_OPTIONS, 'priority');
+  const [groupBy, setGroupBy] = useStoredChoice<GroupBy>(GROUP_KEY, GROUP_OPTIONS, 'none');
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
